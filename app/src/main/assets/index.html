@@ -180,8 +180,6 @@ body.tv .hint{display:block}
     <div id="playerList"></div>
     <p style="margin-top:14px">Open the app on:</p>
     <select id="startSel" aria-label="Start screen"></select>
-    <p style="margin-top:14px">Hidden channels <span style="font-size:13px">(tap a channel name on any game to hide it)</span></p>
-    <div class="teams" id="hiddenList"></div>
     <p style="margin-top:4px">About the last load</p>
     <div class="stats" id="statsBox"></div>
     <p style="margin-top:4px" id="verLine"></p>
@@ -210,16 +208,6 @@ body.tv .hint{display:block}
     <p id="actSub"></p>
     <div id="actList"></div>
     <button class="btn big" id="actClose" style="margin-top:6px">Close</button>
-  </div>
-</div>
-
-<!-- Channel options -->
-<div class="sheet" id="hideSheet" hidden>
-  <div class="box" role="dialog" aria-labelledby="hideTitle">
-    <h2 id="hideTitle"></h2>
-    <p>Hide this channel? Games only on it will disappear. You can bring it back in Settings.</p>
-    <button class="btn big" id="hideYes">Hide channel</button>
-    <button class="btn ghost" id="hideNo" style="margin-top:10px;color:var(--ink)">Cancel</button>
   </div>
 </div>
 
@@ -495,10 +483,12 @@ let favs = store.get('favs') || [];
 let favRemind = !!store.get('favRemind');
 let reminders = {};
 try { reminders = JSON.parse(window.Native ? Native.getReminders() : (localStorage.getItem('rem') || '{}')) || {}; } catch {}
+// Games stay on (and watchable) 20 minutes past their guide end time, for extra time and overruns
+const over = e => e.e + 20 * 60e3;
 const evId = e => `${e.sport}|${e.title}|${e.s}`.slice(0, 180);
 const isFav = e => favs.some(f => (e.title + ' ' + e.comp).toLowerCase().includes(f.toLowerCase()));
 const state = Object.assign({ day: 0, sport: 'all', q: '', live: true, intl: false }, store.get('view') || {}, { q: '', day: 0 });
-let hidden = store.get('hiddenCh') || [];
+const hidden = []; store.set('hiddenCh', null);
 const startView = store.get('startView') || 'last';
 if (startView !== 'last') state.sport = startView;
 // Events with hidden channels removed (and games only on hidden channels dropped).
@@ -520,7 +510,8 @@ function dayEvents() {
 }
 function visible() {
   const q = state.q.trim().toLowerCase();
-  return dayEvents().filter(e =>
+  const now = Date.now();
+  return dayEvents().filter(e => over(e) > now &&
     (state.sport === 'all' || (state.sport === 'fav' ? isFav(e) : e.sport === state.sport)) &&
     (!q || (e.q || (e.title + ' ' + e.comp + ' ' + e.channels.join(' ')).toLowerCase()).includes(q)));
 }
@@ -573,17 +564,17 @@ function renderInner() {
     return;
   }
   const list = visible();
-  const onNow = list.filter(e => e.s <= now && e.e > now).length;
+  const onNow = list.filter(e => e.s <= now && over(e) > now).length;
   $('#sum').textContent = list.length ? `${list.length} ${state.live ? 'live game' : 'listing'}${list.length > 1 ? 's' : ''}${onNow ? ` · ${onNow} on now` : ''}` : '';
   const limit = TV && !showAll ? 60 : Infinity;
   const extra = list.length - Math.min(list.length, limit);
   $('#list').innerHTML = list.length ? list.slice(0, limit).map(e => {
-    const live = e.s <= now && e.e > now, done = e.e <= now;
+    const live = e.s <= now && over(e) > now, done = over(e) <= now;
     const id = evId(e), rem = !!reminders[id];
     return `<li class="ev${done ? ' done' : ''}" data-id="${esc(id)}"${TV ? ' tabindex="0"' : ''}>${done || live ? '' : `<button class="bell${rem ? ' on' : ''}" data-id="${esc(id)}" aria-label="${rem ? 'Cancel reminder' : 'Remind me'}" aria-pressed="${rem}">${rem ? '🔔' : '🔕'}</button>`}
       <div class="t">${e.hs || hhmm(new Date(e.s))}<small>${done ? 'Finished' : 'to ' + (e.he || hhmm(new Date(e.e)))}</small></div>
       <div><div class="ti">${esc(e.title)}</div>${e.comp ? `<div class="co">${esc(e.comp)}</div>` : ''}
-      <div class="meta">${!done && (e.streams || []).length ? `<button class="watch" data-id="${esc(id)}" aria-label="Watch ${esc(e.title)}">▶ Watch</button>` : ''}${canCatchUp(e, now) ? `<button class="catch" data-id="${esc(id)}" aria-label="Watch ${esc(e.title)} from the start">⏮ ${done ? 'Replay' : 'From start'}</button>` : ''}${live ? '<span class="live"><i></i>ON NOW</span>' : ''}${!state.live && e.live && !live ? '<span class="billed">Live</span>' : ''}${e.channels.map(c => `<button class="ch" data-ch="${esc(c)}">${esc(c)}</button>`).join('')}${state.sport === 'all' ? `<span class="sp">${esc(sportName(e.sport))}</span>` : ''}</div></div></li>`;
+      <div class="meta">${!done && (e.streams || []).length ? `<button class="watch" data-id="${esc(id)}" aria-label="Watch ${esc(e.title)}">▶ Watch</button>` : ''}${!done && canCatchUp(e, now) ? `<button class="catch" data-id="${esc(id)}" aria-label="Watch ${esc(e.title)} from the start">⏮ From start</button>` : ''}${live ? '<span class="live"><i></i>ON NOW</span>' : ''}${!state.live && e.live && !live ? '<span class="billed">Live</span>' : ''}${e.channels.map(c => `<span class="ch">${esc(c)}</span>`).join('')}${state.sport === 'all' ? `<span class="sp">${esc(sportName(e.sport))}</span>` : ''}</div></div></li>`;
   }).join('') + (extra > 0 ? `<li><button class="btn big" id="showAll" style="margin:14px 0">Show all ${list.length} games</button></li>` : '') : `<li class="empty"><strong>Nothing on</strong>${state.live ? 'No live games match. Untick “Live games only” to include repeats.' : 'No listings match. Try another sport or day.'}</li>`;
 }
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toast.k); toast.k = setTimeout(() => t.classList.remove('on'), 1800); }
@@ -612,7 +603,7 @@ function removeReminder(id) {
 }
 function afterRefresh() {
   const now = Date.now();
-  const upcoming = shownEvents().filter(e => e.live && !e.intl && e.e > now).slice(0, 12)
+  const upcoming = shownEvents().filter(e => e.live && !e.intl && over(e) > now).slice(0, 12)
     .map(e => ({ s: e.s, e: e.e, title: e.title, ch: e.channels[0] || '' }));
   if (window.Native) Native.saveWidget(JSON.stringify(upcoming));
   if (favRemind && favs.length) {
@@ -748,23 +739,6 @@ $('#list').addEventListener('click', e => {
   $('#chSheet').hidden = false;
 });
 
-// ---------- Hiding channels ----------
-let hideTarget = null;
-$('#list').addEventListener('click', e => {
-  const b = e.target.closest('button.ch'); if (!b) return;
-  hideTarget = b.dataset.ch;
-  $('#hideTitle').textContent = hideTarget;
-  $('#hideSheet').hidden = false;
-  setTimeout(() => $('#hideNo').focus(), 50);
-});
-$('#hideYes').addEventListener('click', () => {
-  if (hideTarget && !hidden.includes(hideTarget)) hidden.push(hideTarget);
-  store.set('hiddenCh', hidden); $('#hideSheet').hidden = true;
-  toast(`${hideTarget} hidden`); render(); afterRefresh();
-});
-$('#hideNo').addEventListener('click', () => { $('#hideSheet').hidden = true; });
-$('#hideSheet').addEventListener('click', e => { if (e.target.id === 'hideSheet') $('#hideSheet').hidden = true; });
-
 // ---------- Update alerts ----------
 // What people see: "1.0" from the app, and "Pitchside 1.1" from the release name.
 const myVersion = () => (window.Native && Native.versionName && Native.versionName()) || '';
@@ -799,7 +773,7 @@ async function checkUpdate(manual) {
 }
 
 // ---------- TV remote ----------
-function openSheet() { return ['actSheet', 'chSheet', 'hideSheet', 'setSheet', 'favSheet'].map(id => $('#' + id)).find(el => !el.hidden); }
+function openSheet() { return ['actSheet', 'chSheet', 'setSheet', 'favSheet'].map(id => $('#' + id)).find(el => !el.hidden); }
 function navTargets() {
   const scope = openSheet() || ($('#loginView').hidden ? $('#mainView') : $('#loginView'));
   return [...scope.querySelectorAll('button:not([disabled]):not([tabindex="-1"]), input, select, .ev[tabindex="0"]')]
@@ -875,13 +849,12 @@ function closeActions() {
 }
 function openActions(ev) {
   actRow = evId(ev);
-  const now = Date.now(), done = ev.e <= now, id = evId(ev);
+  const now = Date.now(), done = over(ev) <= now, id = evId(ev);
   const acts = [];
   if (!done) for (const st of ev.streams || []) acts.push([`▶ Watch on ${st.n}`, () => play(st, ev.title)]);
-  if (canCatchUp(ev, now)) for (const st of ev.streams.filter(x => x.a > 0)) acts.push([`⏮ ${done ? 'Replay' : 'From start'} on ${st.n}`, () => playCatchUp(st, ev)]);
+  if (!done && canCatchUp(ev, now)) for (const st of ev.streams.filter(x => x.a > 0)) acts.push([`⏮ From start on ${st.n}`, () => playCatchUp(st, ev)]);
   if (ev.s > now + 15 * 60e3) acts.push(reminders[id] ? ['🔕 Cancel reminder', () => { removeReminder(id); toast('Reminder cancelled'); }]
                                                     : ['🔔 Remind me 15 minutes before', () => { addReminder(ev); toast('Reminder set'); }]);
-  for (const c of ev.channels) acts.push([`Hide ${c}`, () => { if (!hidden.includes(c)) hidden.push(c); store.set('hiddenCh', hidden); toast(`${c} hidden`); afterRefresh(); }]);
   $('#actTitle').textContent = ev.title;
   $('#actSub').textContent = `${hhmm(new Date(ev.s))} – ${hhmm(new Date(ev.e))}${ev.comp ? ' · ' + ev.comp : ''}`;
   $('#actList').innerHTML = acts.map((a, i) => `<button class="opt" data-i="${i}">${esc(a[0])}</button>`).join('');
@@ -933,9 +906,6 @@ function renderSettings() {
   $('#playerList').innerHTML = opts.map(o => `<button class="opt" data-mode="${esc(o.id)}" aria-pressed="${o.id === playerMode}"><span>${esc(o.label)}<small>${esc(o.note)}</small></span></button>`).join('');
   const startOpts = [['last', 'Where I left off'], ['all', 'All sport'], ...(favs.length ? [['fav', '★ Favourites']] : []), ...SPORTS.slice(1).map(x => [x.id, x.name])];
   $('#startSel').innerHTML = startOpts.map(([v, l]) => `<option value="${v}"${v === (store.get('startView') || 'last') ? ' selected' : ''}>${esc(l)}</option>`).join('');
-  $('#hiddenList').innerHTML = hidden.length
-    ? hidden.map((c, i) => `<span class="team">${esc(c)}<button data-i="${i}" aria-label="Show ${esc(c)} again">×</button></span>`).join('')
-    : '<span style="color:var(--mut);font-size:14px">None</span>';
   $('#verLine').textContent = myVersion() ? `Pitchside version ${myVersion()}` : 'Pitchside';
   const st = store.get('stats');
   $('#statsBox').textContent = st
@@ -950,10 +920,6 @@ $('#playerList').addEventListener('click', e => {
 $('#setClose').addEventListener('click', () => { $('#setSheet').hidden = true; });
 $('#checkUpd').addEventListener('click', () => checkUpdate(true));
 $('#startSel').addEventListener('change', e => { store.set('startView', e.target.value); toast('Start screen saved'); });
-$('#hiddenList').addEventListener('click', e => {
-  const b = e.target.closest('button[data-i]'); if (!b) return;
-  hidden.splice(+b.dataset.i, 1); store.set('hiddenCh', hidden); renderSettings(); render(); afterRefresh();
-});
 $('#setSheet').addEventListener('click', e => { if (e.target.id === 'setSheet') $('#setSheet').hidden = true; });
 
 $('#signout').addEventListener('click', () => {
@@ -1012,7 +978,7 @@ $('#favClose').addEventListener('click', () => { $('#favSheet').hidden = true; }
 $('#favSheet').addEventListener('click', e => { if (e.target.id === 'favSheet') $('#favSheet').hidden = true; });
 
 let pullY = null, pulled = 0;
-document.addEventListener('touchstart', e => { pullY = (window.scrollY <= 0 && !$('#mainView').hidden && $('#favSheet').hidden && $('#setSheet').hidden && $('#chSheet').hidden && $('#hideSheet').hidden) ? e.touches[0].clientY : null; pulled = 0; }, { passive: true });
+document.addEventListener('touchstart', e => { pullY = (window.scrollY <= 0 && !$('#mainView').hidden && $('#favSheet').hidden && $('#setSheet').hidden && $('#chSheet').hidden) ? e.touches[0].clientY : null; pulled = 0; }, { passive: true });
 document.addEventListener('touchmove', e => {
   if (pullY === null) return;
   pulled = e.touches[0].clientY - pullY;
@@ -1028,7 +994,7 @@ document.addEventListener('touchend', () => {
 if (window.Native && Native.isTv && Native.isTv()) document.body.classList.add('tv');
 $('#copy').addEventListener('click', () => {
   const now = Date.now();
-  const list = visible().filter(e => e.e > now);
+  const list = visible().filter(e => over(e) > now);
   const head = `${dayWord(state.day)}'s ${state.sport === 'all' ? 'sport' : sportName(state.sport)} — ${niceDate(state.day, { weekday: 'short', day: 'numeric', month: 'short' })}`;
   const line = e => `${e.s <= now ? 'NOW  ' : hhmm(new Date(e.s)) + ' '} ${e.title} — ${e.channels.slice(0, 3).join(' / ')}`;
   let bodyText;
@@ -1049,7 +1015,6 @@ window.onBack = () => {
   if (!$('#favSheet').hidden) { $('#favSheet').hidden = true; return true; }
   if (!$('#setSheet').hidden) { $('#setSheet').hidden = true; return true; }
   if (!$('#chSheet').hidden) { $('#chSheet').hidden = true; return true; }
-  if (!$('#hideSheet').hidden) { $('#hideSheet').hidden = true; return true; }
   if (state.q) { state.q = ''; $('#q').value = ''; render(); return true; }
   if (state.sport !== 'all') { state.sport = 'all'; saveView(); render(); return true; }
   if (state.day !== 0) { state.day = 0; render(); return true; }
@@ -1077,7 +1042,7 @@ let lastTickSig = '';
 setInterval(() => {
   if ($('#mainView').hidden) return;
   const now = Date.now();
-  const sig = visible().map(e => (e.e <= now ? 'd' : e.s <= now ? 'l' : 'u')).join('') + '|' + new Date().getMinutes();
+  const sig = visible().map(e => (over(e) <= now ? 'd' : e.s <= now ? 'l' : 'u')).join('') + '|' + new Date().getMinutes();
   // On TV, only redraw when a game starts or finishes; phones also refresh the time-based labels.
   const changed = sig.split('|')[0] !== lastTickSig.split('|')[0];
   lastTickSig = sig;
