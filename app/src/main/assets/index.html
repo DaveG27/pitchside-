@@ -133,6 +133,7 @@ body.tv .hint{display:block}
     <div class="err" id="loginErr" role="alert"></div>
     <button class="btn big" id="loginBtn" type="submit">Sign in</button>
   </form>
+  <p id="loginVer" style="margin-top:14px;opacity:.6;font-size:13px"></p>
 </div>
 
 <!-- Listings -->
@@ -651,7 +652,7 @@ function showMain() {
 }
 $('#loginForm').addEventListener('submit', async e => {
   e.preventDefault();
-  const login = { u: $('#u').value.trim(), p: $('#pw').value };
+  const login = { u: $('#u').value.trim(), p: $('#pw').value.replace(/\s+$/, '') };
   if (!login.u || !login.p) return;
   $('#loginBtn').disabled = true; $('#loginBtn').textContent = 'Checking…'; $('#loginErr').textContent = '';
   try {
@@ -907,6 +908,7 @@ function renderSettings() {
   const startOpts = [['last', 'Where I left off'], ['all', 'All sport'], ...(favs.length ? [['fav', '★ Favourites']] : []), ...SPORTS.slice(1).map(x => [x.id, x.name])];
   $('#startSel').innerHTML = startOpts.map(([v, l]) => `<option value="${v}"${v === (store.get('startView') || 'last') ? ' selected' : ''}>${esc(l)}</option>`).join('');
   $('#verLine').textContent = myVersion() ? `Pitchside version ${myVersion()}` : 'Pitchside';
+  if ($('#loginVer')) $('#loginVer').textContent = $('#verLine').textContent;
   const st = store.get('stats');
   $('#statsBox').textContent = st
     ? `${st.kept} sport listings (${st.live} live) from ${st.checked} channel guides${st.quick ? ' (quick refresh)' : ''}. ${st.programmes} programmes read${st.failed ? `, ${st.failed} channels didn't respond` : ''}.${st.noGuide != null ? ` ${st.noGuide} of ${st.sportStreams} sport channels have no guide.` : ''}`
@@ -1050,6 +1052,8 @@ setInterval(() => {
 }, 60000);
 
 if (getLogin()) showMain(); else showLogin();
+// Version on the sign-in screen too, so it can be checked before signing in.
+try { if ($('#loginVer')) $('#loginVer').textContent = myVersion() ? `Pitchside version ${myVersion()}` : ''; } catch (e) {}
 }
 </script>
 </body>
